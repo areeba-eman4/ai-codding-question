@@ -1,6 +1,7 @@
 import { Controller, Query, Sse, Get } from '@nestjs/common';
 import { Observable } from 'rxjs';
 import { AICodingQuestionService } from './aicoding-ques.services';
+import { CodingQuestionDto } from './dto/coding-question.dto';
 
 @Controller('aicoding-question')
 export class AICoddingQuesController {
@@ -16,6 +17,7 @@ export class AICoddingQuesController {
     }
   }
 
+  
   @Get('generate')
   @Sse()
   generate(
@@ -23,7 +25,7 @@ export class AICoddingQuesController {
     @Query('type') type: string,
     @Query('difficulty') difficulty: string,
     @Query('count') count: number,
-  ): Observable<any> {
+  ): Observable<{ data: CodingQuestionDto }> {
     return new Observable((subscriber) => {
       this.codingService
         .generateQuestion({
@@ -32,8 +34,11 @@ export class AICoddingQuesController {
           difficulty,
           Count: Number(count) || 1,
         })
-        .then((result) => {
-          subscriber.next({ data: result });
+        .then((questions) => {
+          // Stream each question one by one
+          for (const q of questions) {
+            subscriber.next({ data: q });
+          }
           subscriber.complete();
         })
         .catch((e) => subscriber.error(e));
