@@ -1,7 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { googlechatmodel } from './ai/google.genai.provider';
 import { CodingQuestionDto } from './dto/coding-question.dto';
-
 @Injectable()
 export class AICodingQuestionService {
   async generateQuestion(options: {
@@ -10,18 +9,16 @@ export class AICodingQuestionService {
     difficulty: string;
     Count?: number;
   }): Promise<CodingQuestionDto[]> {
+    
     const prompt = this.buildPrompt(options);
     const response = await googlechatmodel.invoke(prompt);
     console.log('AI Full Response:', response);
     
-    // Extract the raw text from the response
     let raw: string;
 
-    // Check if content is a string directly
     if (typeof response.content === 'string') {
       raw = response.content;
     } 
-    // Check if content is an array
     else if (Array.isArray(response.content)) {
       const first = response.content[0];
 
@@ -40,27 +37,66 @@ export class AICodingQuestionService {
         raw = JSON.stringify(first);
       }
     }
-    // Fallback
     else {
       raw = JSON.stringify(response.content);
     }
 
-    console.log("AI Raw Content:", raw);
+    console.log("AI Raw Content (first 500 chars):", raw.substring(0, 500));
 
-    // Remove markdown code blocks and trim
+    // Remove markdown code blocks
     raw = raw.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
-    console.log("AI Cleaned Content:", raw);
+    
+    raw = this.sanitizeJSON(raw);
+    
+    console.log("AI Cleaned Content (first 500 chars):", raw.substring(0, 500));
 
     try {
       const parsed = JSON.parse(raw);
-      console.log('Parsed AI JSON:', parsed);
-      // Normalize: always return an array
+      console.log('Successfully parsed AI JSON');
       return Array.isArray(parsed) ? parsed : [parsed];
     } catch (err) {
-      console.error('Failed to parse AI JSON:', raw);
+      console.error('❌ Failed to parse AI JSON');
       console.error('Parse error:', err.message);
-      throw new Error(`AI returned invalid JSON: ${err.message}`);
+      console.error('Problematic JSON (first 1000 chars):', raw.substring(0, 1000));
+      
+      // Try one more time with more aggressive cleaning
+      try {
+        const aggressiveClean = this.aggressiveSanitize(raw);
+        const parsed = JSON.parse(aggressiveClean);
+        console.log(' Parsed after aggressive sanitization');
+        return Array.isArray(parsed) ? parsed : [parsed];
+      } catch (secondErr) {
+        throw new Error(`AI returned invalid JSON: ${err.message}`);
+      }
     }
+  }
+  private sanitizeJSON(jsonStr: string): string {
+    // This function fixes common JSON issues that AI models produce
+    
+    // 1. Replace unescaped newlines in string values
+    // Match string values and escape newlines within them
+    jsonStr = jsonStr.replace(
+      /"([^"\\]*(\\.[^"\\]*)*)"/g,
+      (match) => {
+        // Replace literal newlines with \n
+        return match.replace(/\n/g, '\\n').replace(/\r/g, '\\r').replace(/\t/g, '\\t');
+      }
+    );
+
+    return jsonStr;
+  }
+
+  private aggressiveSanitize(jsonStr: string): string {
+    // Remove any actual newlines, tabs, etc. and replace with escaped versions
+    jsonStr = jsonStr
+      .replace(/\n/g, '\\n')
+      .replace(/\r/g, '\\r')
+      .replace(/\t/g, '\\t');
+    
+    // Remove any control characters
+    jsonStr = jsonStr.replace(/[\x00-\x1F\x7F]/g, '');
+    
+    return jsonStr;
   }
 
   private buildPrompt(options: {
@@ -76,17 +112,30 @@ export class AICodingQuestionService {
 Generate ${count} coding question(s) of type "${options.type}" and difficulty "${options.difficulty}".
 Return ONLY valid JSON array (no markdown, no explanation, no code blocks).
 
+CRITICAL JSON FORMATTING RULES:
+1. All string values MUST escape special characters: \\n for newlines, \\t for tabs, \\" for quotes
+2. No actual line breaks inside string values
+3. All strings must be on a single line or use \\n for line breaks
+4. Ensure proper comma placement between array elements and object properties
+
 ${count === 1 ? 'Return a single object:' : 'Return an array of objects:'}
 
 ${count === 1 ? '{' : '['}
   {
     "title": "Question Title",
-    "description": "Detailed question description",
+    "description": "Detailed question description. Use \\n for line breaks.",
     "tags": ["tag1", "tag2"],
     "templates": [
-      {"templateLanguage": "js", "template": "function code here..."},
-      {"templateLanguage": "python", "template": "class Solution:\\n    def method..."}
+      {
+        "templateLanguage": "js", 
+        "template": "function solution() {\\n  // Code here\\n}"
+      },
+      {
+        "templateLanguage": "python", 
+        "template": "class Solution:\\n    def method(self):\\n        # Code here"
+      }
     ],
+    "Solution": "Explanation here. Use \\n for paragraphs.",
     "testCases": [
       { "input": "1", "output": "2" },
       { "input": "2", "output": "4" },
@@ -100,7 +149,11 @@ ${count === 1 ? '}' : ']'}
 
 Languages to provide templates for: ${languagesList}.
 
-CRITICAL: Return ONLY the JSON, no markdown blocks, no explanation text.
+IMPORTANT: 
+- Double-check JSON validity before responding
+- Escape all newlines as \\n
+- No raw line breaks in strings
+- Valid JSON only, parseable by JSON.parse()
 `;
   }
 
@@ -108,12 +161,10 @@ CRITICAL: Return ONLY the JSON, no markdown blocks, no explanation text.
     const prompt = 'Hello AI, are you up?';
     const response = await googlechatmodel.invoke(prompt);
     
-    // Handle string content directly
     if (typeof response.content === 'string') {
       return response.content;
     }
     
-    // Handle array content
     if (Array.isArray(response.content)) {
       const first = response.content[0];
       
@@ -124,7 +175,6 @@ CRITICAL: Return ONLY the JSON, no markdown blocks, no explanation text.
       if (first && typeof first === 'object') {
         const obj = first as unknown as { content?: unknown; text?: string };
 
-        // Check for text property first
         if (typeof obj.text === 'string') {
           return obj.text;
         }
@@ -142,5 +192,54 @@ CRITICAL: Return ONLY the JSON, no markdown blocks, no explanation text.
     }
 
     return JSON.stringify(response.content);
+  }
+  
+  // ============================================
+  // Streaming generator with retry logic
+  // ============================================
+  async *generateQuestionsStream(options: {
+    languages: string[];
+    type: string;
+    difficulty: string;
+    Count?: number;
+  }): AsyncGenerator<CodingQuestionDto> {
+    const count = options.Count || 1;
+    
+    for (let i = 0; i < count; i++) {
+      let retries = 0;
+      const maxRetries = 3;
+      
+      while (retries < maxRetries) {
+        try {
+          console.log(`\n Generating question ${i + 1}/${count} (attempt ${retries + 1})`);
+          
+          const questions = await this.generateQuestion({
+            ...options,
+            Count: 1,
+          });
+          
+          if (questions.length > 0) {
+            console.log(` Successfully generated question ${i + 1}: "${questions[0].title}"`);
+            yield questions[0];
+            break; // Success, move to next question
+          }
+        } catch (error) {
+          retries++;
+          console.error(`❌ Error generating question ${i + 1} (attempt ${retries}/${maxRetries}):`, error.message);
+          
+          if (retries >= maxRetries) {
+            console.error(`🚫 Failed to generate question ${i + 1} after ${maxRetries} attempts. Skipping...`);
+            // Optionally yield an error object or just skip
+            // yield { error: true, message: error.message } as any;
+            break; // Skip this question and continue with next
+          }
+          
+          // Wait a bit before retrying
+          await new Promise(resolve => setTimeout(resolve, 1000));
+        }
+      }
+    }
+    
+    console.log(`\n✨ Finished generating questions`);
   }
 }
