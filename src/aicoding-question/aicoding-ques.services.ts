@@ -41,18 +41,18 @@ export class AICodingQuestionService {
       raw = JSON.stringify(response.content);
     }
 
-    console.log("AI Raw Content (first 500 chars):", raw.substring(0, 500));
+    // console.log("AI Raw Content (first 500 chars):", raw.substring(0, 500));
 
     // Remove markdown code blocks
     raw = raw.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
     
     raw = this.sanitizeJSON(raw);
     
-    console.log("AI Cleaned Content (first 500 chars):", raw.substring(0, 500));
+    // console.log("AI Cleaned Content (first 500 chars):", raw.substring(0, 500));
 
     try {
       const parsed = JSON.parse(raw);
-      console.log('Successfully parsed AI JSON');
+      console.log('Successfully parsed AI JSON', parsed);
       return Array.isArray(parsed) ? parsed : [parsed];
     } catch (err) {
       console.error('❌ Failed to parse AI JSON');
@@ -109,8 +109,9 @@ export class AICodingQuestionService {
     const languagesList = options.languages.join('", "');
     
     return `
-Generate ${count} coding question(s) of type "${options.type}" and difficulty "${options.difficulty}".
-Return ONLY valid JSON array (no markdown, no explanation, no code blocks).
+    You are an assistant to generate coding questions. I have a plateform where I take assessments from candidates. I need a template students will attempt and a complete solution code that will be sent to compiler with your provided test cases as input. Solution code should be able to read test cases inputs..
+Generate ${count} coding question(s) of type "${options.type}" and difficulty "${options.difficulty} also create unique title.".
+Return ONLY valid JSON array (no markdown, no explanation, no code blocks). 
 
 CRITICAL JSON FORMATTING RULES:
 1. All string values MUST escape special characters: \\n for newlines, \\t for tabs, \\" for quotes
@@ -123,26 +124,27 @@ ${count === 1 ? 'Return a single object:' : 'Return an array of objects:'}
 ${count === 1 ? '{' : '['}
   {
     "title": "Question Title",
+    "languages": "languages here in lowercase"
     "description": "Detailed question description. Use \\n for line breaks.",
     "tags": ["tag1", "tag2"],
     "templates": [
       {
-        "templateLanguage": "js", 
+        "templateLanguage": "javascript", 
         "template": "function solution() {\\n  // Code here\\n}"
       },
       {
-        "templateLanguage": "python", 
+        "templateLanguage": "python",
         "template": "class Solution:\\n    def method(self):\\n        # Code here"
       }
     ],
-    "Solution": "Explanation here. Use \\n for paragraphs.",
+    "Solution": "give the solution to 1 of the template(starter code) also call that function to generate output using input",
     "testCases": [
       { "input": "1", "output": "2" },
       { "input": "2", "output": "4" },
       { "input": "3", "output": "6" },
       { "input": "4", "output": "8" }
     ],
-    "difficultyLevel": "${options.difficulty}"
+    "difficultyLevel": "${options.difficulty}.tolowerCase()",
   }${count === 1 ? '' : ','}
   ${count > 1 ? '...' : ''}
 ${count === 1 ? '}' : ']'}
@@ -152,6 +154,7 @@ Languages to provide templates for: ${languagesList}.
 IMPORTANT: 
 - Double-check JSON validity before responding
 - Escape all newlines as \\n
+-in template just give the starter code only
 - No raw line breaks in strings
 - Valid JSON only, parseable by JSON.parse()
 `;
@@ -193,10 +196,6 @@ IMPORTANT:
 
     return JSON.stringify(response.content);
   }
-  
-  // ============================================
-  // Streaming generator with retry logic
-  // ============================================
   async *generateQuestionsStream(options: {
     languages: string[];
     type: string;
