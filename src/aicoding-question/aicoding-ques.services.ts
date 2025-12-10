@@ -31,16 +31,19 @@ export class AICodingQuestionService {
   async generateQuestion(options: codingQuestion): Promise<CodingQuestionDto[]> {
     const prompt = this.buildPrompt(options);
 
-    // Using Responses API with parse method
-    const response = await openai_model.responses.create({
+    // Using Chat Completions API with structured outputs
+    const response = await openai_model.chat.completions.create({
       model: "gpt-4o-2024-08-06",
-      input: [
-        { role: "system", content: "You are a helpful professional assistant in generating coding questions. Always respond with valid JSON only." },
+      messages: [
+        { 
+          role: "system", 
+          content: "You are a helpful professional assistant in generating coding questions. Always respond with valid JSON only." 
+        },
         { role: "user", content: prompt }
       ],
-      text: {
-        format: {
-          type: "json_schema",
+      response_format: {
+        type: "json_schema",
+        json_schema: {
           name: "AICodingQuestionResponse",
           strict: true,
           schema: {
@@ -89,14 +92,18 @@ export class AICodingQuestionService {
         }
       },
       temperature: 0.7,
+      max_tokens: 3000
     });
 
-    // Access parsed output directly - .parse() returns already parsed object
-    const parsed = response.output_text as unknown as AICodingResponse;
-
-    if (!parsed) {
-      throw new Error('No parsed output in AI response');
+    // Parse the response
+    const content = response.choices[0]?.message?.content;
+    
+    if (!content) {
+      throw new Error('No content in AI response');
     }
+
+    // Parse JSON from the response
+    const parsed: AICodingResponse = JSON.parse(content);
 
     // Transform to DTO
     const codingQuestionDto: CodingQuestionDto = {
@@ -177,31 +184,16 @@ IMPORTANT: Return ONLY valid JSON matching the schema. No additional text or exp
   async checkAI(): Promise<string> {
     const prompt = 'Hello AI, are you up?';
 
-    // Using Responses API
-    const response = await openai_model.responses.create({
+    const response = await openai_model.chat.completions.create({
       model: "gpt-4o",
-      input: [
+      messages: [
         { role: "system", content: "You are a helpful coding assistant." },
         { role: "user", content: prompt }
       ],
       temperature: 0.7,
+      max_tokens: 2000
     });
 
-    // Extract text from response output
-    const outputItem = response.output[0];
-    
-    if (!outputItem) {
-      return 'No response';
-    }
-
-    // Handle different output types
-    if ('content' in outputItem && Array.isArray(outputItem.content)) {
-      const textContent = outputItem.content.find((item: any) => item.type === 'text');
-      if (textContent && 'text' in textContent) {
-        return (textContent as any).text || 'No response';
-      }
-    }
-    
-    return 'No response';
+    return response.choices[0]?.message?.content || 'No response';
   }
 }
