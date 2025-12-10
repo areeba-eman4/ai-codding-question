@@ -2,143 +2,131 @@ import { Injectable } from '@nestjs/common';
 import { openai_model } from './ai/google.genai.provider'
 import { CodingQuestionDto } from './dto/coding-question.dto';
 
+export interface codingQuestion {
+  languages: string[];
+  type: string;
+  difficulty: string;
+  Count?: number;
+}
+
+export type AICodingResponse = {
+  title: string;
+  description: string;
+  languages: string[];
+  difficultyLevel: string;
+  tags: string[];
+  templates: {
+    templateLanguage: string;
+    template: string;
+  }[];
+  Solution: string;
+  testCases: {
+    input: string;
+    output: string;
+  }[];
+};
+
 @Injectable()
 export class AICodingQuestionService {
-  async generateQuestion(options: {
-    languages: string[];
-    type: string;
-    difficulty: string;
-    Count?: number;
-  }): Promise<CodingQuestionDto[]> {
-
+  async generateQuestion(options: codingQuestion): Promise<CodingQuestionDto[]> {
     const prompt = this.buildPrompt(options);
-    const response = await openai_model.chat.completions.create({
-      model: "gpt-4",
-      messages: [
-        { role: "system", content: "You are a helpful coding assistant that generates valid JSON responses." },
+
+    // Using Responses API with parse method
+    const response = await openai_model.responses.create({
+      model: "gpt-4o-2024-08-06",
+      input: [
+        { role: "system", content: "You are a helpful professional assistant in generating coding questions. Always respond with valid JSON only." },
         { role: "user", content: prompt }
       ],
+      text: {
+        format: {
+          type: "json_schema",
+          name: "AICodingQuestionResponse",
+          strict: true,
+          schema: {
+            type: "object",
+            properties: {
+              title: { type: "string" },
+              description: { type: "string" },
+              languages: {
+                type: "array",
+                items: { type: "string" }
+              },
+              difficultyLevel: { type: "string" },
+              tags: {
+                type: "array",
+                items: { type: "string" }
+              },
+              templates: {
+                type: "array",
+                items: {
+                  type: "object",
+                  properties: {
+                    templateLanguage: { type: "string" },
+                    template: { type: "string" }
+                  },
+                  required: ["templateLanguage", "template"],
+                  additionalProperties: false
+                }
+              },
+              Solution: { type: "string" },
+              testCases: {
+                type: "array",
+                items: {
+                  type: "object",
+                  properties: {
+                    input: { type: "string" },
+                    output: { type: "string" }
+                  },
+                  required: ["input", "output"],
+                  additionalProperties: false
+                }
+              }
+            },
+            required: ["title", "description", "languages", "difficultyLevel", "tags", "templates", "Solution", "testCases"],
+            additionalProperties: false
+          }
+        }
+      },
       temperature: 0.7,
-      max_tokens: 3000
-    })
-    console.log('AI Full Response:', response);
+    });
 
-    // Extract AI response
-    let raw = response.choices[0].message?.content || '';
-    console.log('AI Raw Output:', raw);
-    
-    // Remove markdown code blocks
-    raw = raw.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
-    raw = raw.replace(/,(\s*[}\]])/g, '$1');
-    
-    try {
-      const parsed = JSON.parse(raw);
-      return Array.isArray(parsed) ? parsed : [parsed];
-    } catch (err) {
-      console.error('Initial parse failed, trying aggressive sanitization:', err.message);
-      const aggressiveClean = this.aggressiveSanitize(raw);
-      const parsed = JSON.parse(aggressiveClean);
-      return Array.isArray(parsed) ? parsed : [parsed];
+    // Access parsed output directly - .parse() returns already parsed object
+    const parsed = response.output_text as unknown as AICodingResponse;
+
+    if (!parsed) {
+      throw new Error('No parsed output in AI response');
     }
+
+    // Transform to DTO
+    const codingQuestionDto: CodingQuestionDto = {
+      ...parsed,
+      isSingleTemplate: parsed.templates.length === 1,
+      tag: parsed.tags.length ? parsed.tags[0] : ""
+    };
+
+    console.log("Generated question:", codingQuestionDto.title);
+    return [codingQuestionDto];
   }
 
-  private aggressiveSanitize(jsonStr: string): string {
-    // Remove any control characters except newlines in strings
-    jsonStr = jsonStr.replace(/[\x00-\x09\x0B-\x1F\x7F]/g, '');
-    
-    // Fix common JSON issues
-    jsonStr = jsonStr
-      // Remove trailing commas
-      .replace(/,(\s*[}\]])/g, '$1')
-      // Fix multiple commas
-      .replace(/,+/g, ',')
-      .replace(/,(\s*\])/g, '$1')
-      .replace(/,(\s*})/g, '$1');
-
-    return jsonStr;
-  }
-
-  private buildPrompt(options: {
-    languages: string[];
-    type: string;
-    difficulty: string;
-    Count?: number;
-  }): string {
-    const count = options.Count || 1;
-    const languagesList = options.languages.join(', ');
-
-    return `
-Generate ${count} coding question(s) of type "${options.type}" and difficulty "${options.difficulty}".
+  private buildPrompt(data: codingQuestion): string {
+    return `Generate ${data.Count || 1} coding question(s) in strict JSON format.
 
 REQUIREMENTS:
 1. Create a unique, descriptive title for each question
-2. provide starter code templates for these languages: ${languagesList}
-3. Provide a COMPLETE WORKING SOLUTION in ${options.languages[0]} that:
+2. Problem type: ${data.type} of difficulty level: ${data.difficulty}
+3. Provide templates for languages: ${data.languages.join(', ')}
+4. Provide a COMPLETE WORKING SOLUTION in ${data.languages[0]} that:
    - Reads input from stdin (one input per line)
    - Processes the input according to the problem
    - Prints the output to stdout
    - Can be directly executed with the test cases
-4. Provide 4 test cases with input and expected output
+5. Provide at least 4 test cases with input and output
+6. Include relevant tags for the question type
 
-CRITICAL JSON FORMATTING:
-- Return ONLY valid JSON (no markdown, no explanations, no code blocks)
-- Use \\n for line breaks inside strings
-- Escape all special characters: \\t for tabs, \\" for quotes
-- No actual newlines inside string values
-- No trailing commas
-- Ensure proper JSON structure
-
-${count === 1 ? 'Return a single object in this exact format:' : 'Return an array of objects in this exact format:'}
-
-${count === 1 ? '' : '['}
-{
-  "title": "Descriptive Question Title",
-  "languages": [${options.languages.map(lang => `"${lang}"`).join(', ')}],
-  "description": "Clear problem description. Use \\n for line breaks. Include input/output format explanation.",
-  "tags": ["relevant", "tags", "here"],
-  "templates": [
-${options.languages.map(lang => `    {
-      "templateLanguage": "${lang}",
-      "template": "// Starter code for ${lang}\\n// Function signature and basic structure only"
-    }`).join(',\n')}
-  ],
-  "Solution": "Complete working ${options.languages[0]} code that reads from stdin and prints to stdout. Must work with provided test cases.",
-  "testCases": [
-    { "input": "test input 1", "output": "expected output 1" },
-    { "input": "test input 2", "output": "expected output 2" },
-    { "input": "test input 3", "output": "expected output 3" },
-    { "input": "test input 4", "output": "expected output 4" }
-  ],
-  "difficultyLevel": "${options.difficulty.toLowerCase()}"
-}${count === 1 ? '' : ','}
-${count > 1 ? '... more objects ...' : ''}
-${count === 1 ? '' : ']'}
-
-EXAMPLE SOLUTION FORMAT for JavaScript:
-"Solution": "const readline = require('readline');\\nconst rl = readline.createInterface({ input: process.stdin });\\n\\nrl.on('line', (input) => {\\n  const num = parseInt(input);\\n  console.log(num * 2);\\n  rl.close();\\n});"
-
-EXAMPLE SOLUTION FORMAT for Python:
-"Solution": "import sys\\nfor line in sys.stdin:\\n    num = int(line.strip())\\n    print(num * 2)"
-
-Double-check your response is valid JSON before returning it.
-`;
+IMPORTANT: Return ONLY valid JSON matching the schema. No additional text or explanations.`;
   }
 
-  async checkAI(): Promise<string> {
-    const prompt = 'Hello AI, are you up?';
-    const response = await openai_model.chat.completions.create({
-      model: "gpt-4",
-      messages: [
-        { role: "system", content: "You are a helpful coding assistant." },
-        { role: "user", content: prompt }
-      ],
-      temperature: 0.7,
-      max_tokens: 2000
-    })
-    let raw = response.choices[0].message?.content || ''
-
-    return raw;
-  }
   async *generateQuestionsStream(options: {
     languages: string[];
     type: string;
@@ -153,7 +141,7 @@ Double-check your response is valid JSON before returning it.
 
       while (retries < maxRetries) {
         try {
-          console.log(`\n Generating question ${i + 1}/${count} (attempt ${retries + 1})`);
+          console.log(`\nGenerating question ${i + 1}/${count} (attempt ${retries + 1})`);
 
           const questions = await this.generateQuestion({
             ...options,
@@ -167,7 +155,10 @@ Double-check your response is valid JSON before returning it.
           }
         } catch (error) {
           retries++;
-          console.error(`Error generating question ${i + 1} (attempt ${retries}/${maxRetries}):`, error.message);
+          console.error(
+            `Error generating question ${i + 1} (attempt ${retries}/${maxRetries}):`,
+            (error as Error).message
+          );
 
           if (retries >= maxRetries) {
             console.error(`Failed to generate question ${i + 1} after ${maxRetries} attempts. Skipping...`);
@@ -175,11 +166,42 @@ Double-check your response is valid JSON before returning it.
           }
 
           // Exponential backoff
-          await new Promise(resolve => setTimeout(resolve, 1000 * retries));
+          await new Promise(resolve => setTimeout(resolve, 1000 * Math.pow(2, retries - 1)));
         }
       }
     }
 
-    console.log(`\n Finished generating questions`);
+    console.log(`\nFinished generating questions`);
+  }
+
+  async checkAI(): Promise<string> {
+    const prompt = 'Hello AI, are you up?';
+
+    // Using Responses API
+    const response = await openai_model.responses.create({
+      model: "gpt-4o",
+      input: [
+        { role: "system", content: "You are a helpful coding assistant." },
+        { role: "user", content: prompt }
+      ],
+      temperature: 0.7,
+    });
+
+    // Extract text from response output
+    const outputItem = response.output[0];
+    
+    if (!outputItem) {
+      return 'No response';
+    }
+
+    // Handle different output types
+    if ('content' in outputItem && Array.isArray(outputItem.content)) {
+      const textContent = outputItem.content.find((item: any) => item.type === 'text');
+      if (textContent && 'text' in textContent) {
+        return (textContent as any).text || 'No response';
+      }
+    }
+    
+    return 'No response';
   }
 }
