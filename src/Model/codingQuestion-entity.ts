@@ -1,7 +1,7 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
-import { Document } from 'mongoose';
+import mongoose, { Document, mongo } from 'mongoose';
 
-@Schema()
+@Schema({ timestamps: true })
 export class CodingQuestion extends Document {
     @Prop({ required: true })
     title: string;
@@ -18,8 +18,8 @@ export class CodingQuestion extends Document {
     @Prop()
     isSingleTemplate: boolean;
 
-    @Prop()
-    language: string;
+    @Prop({type: mongoose.Schema.ObjectId, ref: 'language'})
+    language: mongoose.Types.ObjectId;
 
     @Prop([
         {
@@ -46,14 +46,14 @@ export class CodingQuestion extends Document {
     @Prop()
     difficultyLevel: string;
 
-    @Prop()
-    tag: string;
+    @Prop({type: mongoose.Schema.ObjectId, ref: 'tag'})
+    tag: mongoose.Types.ObjectId;
 
     @Prop()
-    createdBy: string;
+    createdBy: mongoose.Types.ObjectId;
 
     @Prop()
-    updatedBy: string;
+    updatedBy: mongoose.Types.ObjectId;
 }
 
 export const CodingQuestionSchema = SchemaFactory.createForClass(CodingQuestion);

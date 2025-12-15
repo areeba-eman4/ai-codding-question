@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Body,Param, BadRequestException } from '@nestjs/common';
+import { Controller, Get, Post, Body, Param, BadRequestException } from '@nestjs/common';
 import { CodingQuestionService } from './coding-question.service';
 import { CodingQuestionDto, CreateMultipleCodingQuestionsDto } from './dto/create-coding-question.dto';
 import { ApiOperation, ApiResponse } from '@nestjs/swagger';
@@ -8,7 +8,7 @@ import { ApiTags } from '@nestjs/swagger';
 @ApiTags('Coding Questions')
 @Controller('/api')
 export class CodingQuestionController {
-  constructor(private readonly codingQuestionService: CodingQuestionService) {}
+  constructor(private readonly codingQuestionService: CodingQuestionService) { }
 
 
   @Post('multiple-coding-questions')
@@ -20,18 +20,25 @@ export class CodingQuestionController {
   })
   async createMultiple(
     @Body() dto: CreateMultipleCodingQuestionsDto,
+    // @Req() req: any,
   ) {
-    // ✅ SAFETY CHECK
     if (!dto.codingQuestions || dto.codingQuestions.length === 0) {
-      throw new BadRequestException(
-        'At least one coding question is required',
-      );
+      throw new BadRequestException('At least one coding question is required');
     }
 
-    // ✅ PASS CORRECT FIELD TO SERVICE
+    // const userId = req.user?._id; 
+
+    const enrichedQuestions = dto.codingQuestions.map((q) => ({
+      ...q,
+      questionType: 'general',
+      questionCategory: 'codingQuestion',
+      createdBy: '65180a56c3f19457f7e49a07',
+      updatedBy: '65180a56c3f19457f7e49a07',
+    }));
+
     const result =
       await this.codingQuestionService.createMultipleCodingQuestions(
-        dto.codingQuestions,
+        enrichedQuestions,
       );
 
     return {

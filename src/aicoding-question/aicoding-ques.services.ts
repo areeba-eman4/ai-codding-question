@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { openai_model } from './ai/google.genai.provider'
 import { CodingQuestionDto } from './dto/coding-question.dto';
+import { starterCode } from './starterCode/starterCode';
 
 export interface codingQuestion {
   languages: string[];
@@ -117,13 +118,15 @@ export class AICodingQuestionService {
   }
 
   private buildPrompt(data: codingQuestion): string {
+    const primaryLanguage = data.languages[0].toLowerCase();
+    const solution_template = starterCode[primaryLanguage];
     return `Generate ${data.Count || 1} coding question(s) in strict JSON format.
 
 REQUIREMENTS:
 1. Create a unique, descriptive title for each question
 2. Problem type: ${data.type} of difficulty level: ${data.difficulty}
 3. Provide templates for languages: ${data.languages.join(', ')}
-4. Provide a COMPLETE WORKING SOLUTION in ${data.languages[0]} that:
+4. Provide a COMPLETE WORKING SOLUTION using ${solution_template} that:
    - Reads input from stdin (one input per line)
    - Processes the input according to the problem
    - Prints the output to stdout

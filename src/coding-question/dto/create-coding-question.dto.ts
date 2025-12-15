@@ -67,23 +67,12 @@ export class CodingQuestionDto {
   // @IsOptional()
   templates: TemplateType[];
 
-  // @ApiProperty({
-  //   example: 'calculateSum',
-  //   description: 'The name of the function to be implemented.',
-  // })
-  // functionName: string;
 
   @ApiProperty({
     example: '652194b0b14d13342cb3c77e',
     description: 'ref id for tag',
   })
   tag: string;
-  // @ApiProperty({
-  //   example: ['652194b0b14d13342cb3c77e'],
-  //   description: 'ref ids for tags',
-  // })
-  // @IsString({ each: true })
-  // tags: string[];
 
   @ApiProperty({
     example: [{ input: '1', output: '3' }],
